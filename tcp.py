@@ -1,27 +1,43 @@
-import socket
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-def start_server(host, port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind((host, port))
-        server_socket.listen()
+class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/cam0':
+            # Imposta il percorso del file JPG da servire
+            file_path = 'path/to/your/image.jpg'
 
-        print(f"Server in ascolto su {host}:{port}")
+            try:
+                # Apri il file in modalità binaria
+                with open(file_path, 'rb') as file:
+                    # Leggi il contenuto del file
+                    file_content = file.read()
 
-        while True:
-            # Accetta una nuova connessione
-            client_socket, address = server_socket.accept()
-            print(f"Connessione accettata da {address}")
+                    # Imposta l'intestazione di risposta
+                    self.send_response(200)
+                    self.send_header('Content-type', 'image/jpeg')
+                    self.send_header('Content-length', len(file_content))
+                    self.end_headers()
 
-            with client_socket:
-                # Ricevi il messaggio dal client
-                data = client_socket.recv(1024)
-                if data:
-                    message = data.decode('utf-8')
-                    print(f"Messaggio ricevuto: {message}")
-                    
-                    # Invia un echo della risposta
-                    response = f"Echo: {message}"
-                    client_socket.sendall(response.encode('utf-8'))
+                    # Invia il contenuto del file
+                    self.wfile.write(file_content)
 
-if __name__ == "__main__":
-    start_server('localhost', 12345)
+            except FileNotFoundError:
+                # Gestione dell'errore se il file non viene trovato
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b'File not found')
+        else:
+            # Gestione per le richieste non corrispondenti a /cam0
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'Endpoint not found')
+
+def run(server_class=HTTPServer, handler_class=SimpleHTTPRequestHandler, port=8000):
+    server_address = ('', port)
+    httpd = server_class(server_address, handler_class)
+    print(f'Server in esecuzione sulla porta {port}')
+    httpd.serve_forever()
+
+if __name__ == '__main__':
+    # Esegui il server HTTP sulla porta 8000
+    run(port=8000)
