@@ -1,6 +1,33 @@
 import socket
 import struct
 
+def xtea_decrypt(block, key, rounds=32):
+    """
+    Funzione per decifrare un blocco da 8 byte utilizzando l'algoritmo XTEA.
+    Il blocco è una stringa di 8 byte, e la chiave è una stringa di 16 byte.
+    """
+    v0, v1 = struct.unpack('>2I', block)
+    key = struct.unpack('>4I', key)
+    delta = 0x9E3779B9
+    sum_value = (delta * rounds) & 0xFFFFFFFF
+
+    for _ in range(rounds):
+        v1 = (v1 - ((v0 << 4 ^ v0 >> 5) + v0) ^ (sum_value + key[sum_value >> 11 & 3])) & 0xFFFFFFFF
+        sum_value = (sum_value - delta) & 0xFFFFFFFF
+        v0 = (v0 - ((v1 << 4 ^ v1 >> 5) + v1) ^ (sum_value + key[sum_value & 3])) & 0xFFFFFFFF
+
+    return struct.pack('>2I', v0, v1)
+
+def decrypt_xtea(payload, key):
+    """
+    Funzione che decifra un payload intero utilizzando XTEA in modalità ECB.
+    """
+    decrypted = b""
+    for i in range(0, len(payload), 8):
+        block = payload[i:i+8]
+        decrypted += xtea_decrypt(block, key)
+    return decrypted
+
 def parse_header(header):
     """
     Funzione che estrae le informazioni dall'header.
@@ -28,6 +55,9 @@ def parse_header(header):
     return header_fields
 
 def start_server():
+    # Chiave XTEA (16 byte)
+    xtea_key = b'1234567890abcdef'  # La chiave deve essere condivisa con il client e lunga 16 byte
+
     # Configurazione del server TCP
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('0.0.0.0', 8000))
@@ -62,9 +92,19 @@ def start_server():
                 print("Errore: pacchetto senza terminatore chr(4)")
                 continue
 
+            # Converti il payload in byte
+            payload_bytes = bytes.fromhex(payload_part)
+            
+            # Decifra il payload utilizzando XTEA
+            decrypted_payload = decrypt_xtea(payload_bytes, xtea_key)
+            
+            # Considera solo i primi LEN byte validi, ignorando il padding
+            num_valid_bytes = header_fields['LEN']
+            decrypted_payload = decrypted_payload[:num_valid_bytes]
+
             # Aggiorna il buffer con il numero del pacchetto (NUM)
             num = header_fields['NUM']
-            buffer[num] = payload_part
+            buffer[num] = decrypted_payload.decode('ascii')
 
             # Aggiorna il conteggio totale di pacchetti (TOT)
             if total_packets == 0:
