@@ -1,0 +1,87 @@
+import socket
+import struct
+
+def parse_header(header):
+    """
+    Funzione che estrae le informazioni dall'header.
+    L'header è nel formato ':FC=1;PROG=0000;NUM=0001;TOT=0001;LEN=0000;PAYLOAD='.
+    """
+    header = header.lstrip(':')
+    header_fields = {}
+    
+    # Dividi l'header in campi separati da ';'
+    for field in header.split(';'):
+        if '=' in field:
+            key, value = field.split('=')
+            header_fields[key] = value
+
+    # Converti i campi numerici in interi (esadecimale)
+    try:
+        header_fields['FC'] = int(header_fields.get('FC', '0'), 16)
+        header_fields['PROG'] = int(header_fields.get('PROG', '0'), 16)
+        header_fields['NUM'] = int(header_fields.get('NUM', '0'), 16)
+        header_fields['TOT'] = int(header_fields.get('TOT', '0'), 16)
+        header_fields['LEN'] = int(header_fields.get('LEN', '0'), 16)
+    except ValueError:
+        raise ValueError("Errore nella conversione dell'header da esadecimale a intero.")
+
+    return header_fields
+
+def start_server():
+    # Configurazione del server TCP
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('0.0.0.0', 8000))
+    server_socket.listen(1)
+    print("Server in ascolto sulla porta 8000...")
+
+    while True:
+        conn, addr = server_socket.accept()
+        print(f"Connessione accettata da {addr}")
+
+        # Ricezione e parsing dei pacchetti
+        buffer = {}
+        total_packets = 0
+
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            
+            # Dividi header dal resto del messaggio
+            try:
+                header_part, payload_part = data.decode('ascii').split('PAYLOAD=', 1)
+                header_fields = parse_header(header_part)
+            except (ValueError, UnicodeDecodeError) as e:
+                print(f"Errore nel parsing dei dati ricevuti: {e}")
+                continue
+
+            # Controllo del terminatore chr(4)
+            if payload_part[-1] == chr(4):
+                payload_part = payload_part[:-1]
+            else:
+                print("Errore: pacchetto senza terminatore chr(4)")
+                continue
+
+            # Aggiorna il buffer con il numero del pacchetto (NUM)
+            num = header_fields['NUM']
+            buffer[num] = payload_part
+
+            # Aggiorna il conteggio totale di pacchetti (TOT)
+            if total_packets == 0:
+                total_packets = header_fields['TOT']
+
+            # Controlla se abbiamo ricevuto tutti i pacchetti
+            if len(buffer) == total_packets:
+                break
+
+        # Ordina i pacchetti per numero (NUM) e concatena i payload
+        sorted_buffer = [buffer[i] for i in sorted(buffer.keys())]
+        full_payload = ''.join(sorted_buffer)
+
+        print("Dati ricevuti e organizzati correttamente:")
+        print(full_payload)
+
+        conn.close()
+
+if __name__ == "__main__":
+    start_server()
