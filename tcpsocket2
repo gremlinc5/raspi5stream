@@ -3,10 +3,7 @@ import struct
 import os
 
 def xtea_encrypt(block, key, rounds=32):
-    """
-    Funzione per cifrare un blocco da 8 byte utilizzando l'algoritmo XTEA.
-    Il blocco è una stringa di 8 byte, e la chiave è una stringa di 16 byte.
-    """
+    # Funzione di cifratura XTEA
     v0, v1 = struct.unpack('>2I', block)
     key = struct.unpack('>4I', key)
     delta = 0x9E3779B9
@@ -75,14 +72,13 @@ def create_response(fc, prog, key):
 def create_packet(num, tot, prog, fc, payload, key):
     len_payload = len(payload)
     
-    # Aggiungi padding per allineare a multipli di 8 byte
     if len_payload % 8 != 0:
         padding_length = 8 - (len_payload % 8)
         payload += b'\x00' * padding_length
 
     encrypted_payload = encrypt_xtea(payload, key)
 
-    header = f":FC={fc:X};PROG={prog:04X};NUM={num:04X};TOT={tot:04X};LEN={len_payload:04X};PAYLOAD="
+    header = f":FC={fc:04X};PROG={prog:04X};NUM={num:04X};TOT={tot:04X};LEN={len_payload:04X};PAYLOAD="
     return header.encode('ascii') + encrypted_payload + chr(4).encode('ascii')
 
 def create_image_packets(image_data, prog, fc, key):
@@ -118,59 +114,68 @@ def start_server():
         conn, addr = server_socket.accept()
         print(f"Connessione accettata da {addr}")
 
-        buffer = {}
-        total_packets = 0
-
-        while True:
-            data = conn.recv(1024)
-            if not data:
-                break
-            
-            try:
-                header_part, payload_part = data.decode('ascii').split('PAYLOAD=', 1)
-                header_fields = parse_header(header_part)
-            except (ValueError, UnicodeDecodeError) as e:
-                print(f"Errore nel parsing dei dati ricevuti: {e}")
-                continue
-
-            if payload_part[-1] == chr(4):
-                payload_part = payload_part[:-1]
-            else:
-                print("Errore: pacchetto senza terminatore chr(4)")
-                continue
-
-            payload_bytes = bytes.fromhex(payload_part)
-            decrypted_payload = decrypt_xtea(payload_bytes, xtea_key)
-            
-            num_valid_bytes = header_fields['LEN']
-            decrypted_payload = decrypted_payload[:num_valid_bytes]
-
-            num = header_fields['NUM']
-            buffer[num] = decrypted_payload.decode('ascii')
-
-            if total_packets == 0:
-                total_packets = header_fields['TOT']
-
-            if len(buffer) == total_packets:
-                break
-
-        sorted_buffer = [buffer[i] for i in sorted(buffer.keys())]
-        full_payload = ''.join(sorted_buffer)
-
-        print("Dati ricevuti e organizzati correttamente:")
-        print(full_payload)
-
-        fc = header_fields['FC']
-        prog = header_fields['PROG']
-
         try:
-            response_packets = create_response(fc, prog, xtea_key)
-            for packet in response_packets:
-                conn.sendall(packet)
-        except FileNotFoundError as e:
-            print(f"Errore: {e}")
+            while True:
+                buffer = {}
+                total_packets = 0
 
-        conn.close()
+                # Ricezione dei dati e parsing
+                while True:
+                    data = conn.recv(2048)
+                    if not data:
+                        print("Connessione chiusa dal client.")
+                        return
+
+                    try:
+                        header_part, payload_part = data.decode('ascii').split('PAYLOAD=', 1)
+                        header_fields = parse_header(header_part)
+                    except (ValueError, UnicodeDecodeError) as e:
+                        print(f"Errore nel parsing dei dati ricevuti: {e}")
+                        continue
+
+                    if payload_part[-1] == chr(4):
+                        payload_part = payload_part[:-1]
+                    else:
+                        print("Errore: pacchetto senza terminatore chr(4)")
+                        continue
+
+                    payload_bytes = bytes.fromhex(payload_part)
+                    decrypted_payload = decrypt_xtea(payload_bytes, xtea_key)
+                    
+                    num_valid_bytes = header_fields['LEN']
+                    decrypted_payload = decrypted_payload[:num_valid_bytes]
+
+                    num = header_fields['NUM']
+                    buffer[num] = decrypted_payload.decode('ascii')
+
+                    if total_packets == 0:
+                        total_packets = header_fields['TOT']
+
+                    if len(buffer) == total_packets:
+                        break
+
+                # Organizzazione del buffer e creazione della risposta
+                sorted_buffer = [buffer[i] for i in sorted(buffer.keys())]
+                full_payload = ''.join(sorted_buffer)
+
+                print("Dati ricevuti e organizzati correttamente:")
+                print(full_payload)
+
+                fc = header_fields['FC']
+                prog = header_fields['PROG']
+
+                try:
+                    response_packets = create_response(fc, prog, xtea_key)
+                    for packet in response_packets:
+                        conn.sendall(packet)
+                except FileNotFoundError as e:
+                    print(f"Errore: {e}")
+
+        except Exception as e:
+            print(f"Errore durante la gestione della connessione: {e}")
+        finally:
+            conn.close()
+            print("Connessione chiusa.")
 
 if __name__ == "__main__":
     start_server()
